@@ -149,7 +149,7 @@ async def check_expiry():
 
         embed = discord.Embed(
             title="Tempo de Cargo Expirado",
-            color=discord.Color.from_rgb(0, 0, 0),
+            color=discord.Color(0x000000),
             timestamp=datetime.utcnow()
         )
         embed.add_field(name="Usuario",       value=f"<@{row['user_id']}> (`{row['user_id']}`)",                   inline=False)
@@ -222,7 +222,7 @@ class PainelView(View):
         conn.commit()
         conn.close()
 
-        embed = make_base_embed(guild, "Cargo Setado", discord.Color.green())
+        embed = make_base_embed(guild, "Cargo Setado", discord.Color(0x000000))
         embed.add_field(name="Usuario",     value=self.target.mention,                  inline=True)
         embed.add_field(name="Cargo",       value=f"<@&{self.cargo_id}>",               inline=True)
         embed.add_field(name="Servidor",    value=self.servidor,                         inline=True)
@@ -237,7 +237,7 @@ class PainelView(View):
 
         await notify_main_user(embed)
 
-        dm_embed = make_base_embed(guild, "Cargo Temporario Recebido", discord.Color.blurple())
+        dm_embed = make_base_embed(guild, "Cargo Temporario Recebido", discord.Color(0x000000))
         dm_embed.add_field(name="Cargo",         value=f"<@&{self.cargo_id}>",               inline=True)
         dm_embed.add_field(name="Servidor Dono", value=self.servidor,                          inline=True)
         dm_embed.add_field(name="Data Setado",   value=now.strftime("%d/%m/%Y %H:%M"),         inline=True)
@@ -336,7 +336,7 @@ class TempoView(View):
         dias = int(select.values[0])
         upsert_config(self.ctx.guild.id, tempo_dias=dias)
 
-        embed = make_base_embed(self.ctx.guild, "Tempo Configurado", discord.Color.green())
+        embed = make_base_embed(self.ctx.guild, "Tempo Configurado", discord.Color(0x000000))
         embed.description = f"O tempo de cargo foi definido para **{dias} dias**."
 
         for item in self.children:
@@ -488,7 +488,7 @@ class EmbedEnvView(View):
 
         embed = discord.Embed(
             title="Painel de Embed",
-            color=discord.Color.blurple(),
+            color=discord.Color(0x000000),
             timestamp=datetime.utcnow()
         )
         embed.add_field(name="Titulo",  value=self._nd(self.state["titulo"]),  inline=True)
@@ -627,12 +627,12 @@ def is_staff():
 @is_staff()
 async def cmd_painel(ctx: commands.Context, target: discord.Member = None):
     if target is None:
-        embed = make_base_embed(ctx.guild, "Erro", discord.Color.red())
+        embed = make_base_embed(ctx.guild, "Erro", discord.Color(0x000000))
         embed.description = "Mencione um usuario: `br!painel @usuario`"
         await ctx.send(embed=embed)
         return
 
-    embed = make_base_embed(ctx.guild, "Painel de Setagem", discord.Color.blurple())
+    embed = make_base_embed(ctx.guild, "Painel de Setagem", discord.Color(0x000000))
     embed.description = (
         f"Configurando cargo para {target.mention}\n\n"
         "Use os botoes abaixo para configurar o **cargo** e o **servidor**.\n"
@@ -647,7 +647,7 @@ async def cmd_painel(ctx: commands.Context, target: discord.Member = None):
     if not (view.cargo_id and view.servidor):
         for item in view.children:
             item.disabled = True
-        expired_embed = make_base_embed(ctx.guild, "Painel Expirado", discord.Color.red())
+        expired_embed = make_base_embed(ctx.guild, "Painel Expirado", discord.Color(0x000000))
         expired_embed.description = "O painel expirou sem configuracao completa."
         try:
             await msg.edit(embed=expired_embed, view=view)
@@ -664,7 +664,7 @@ async def cmd_painel(ctx: commands.Context, target: discord.Member = None):
 @is_owner()
 async def cmd_setcargo(ctx: commands.Context, role: discord.Role = None):
     if role is None:
-        embed = make_base_embed(ctx.guild, "Erro", discord.Color.red())
+        embed = make_base_embed(ctx.guild, "Erro", discord.Color(0x000000))
         embed.description = "Mencione um cargo: `br!setcargo @cargo`"
         msg = await ctx.send(embed=embed)
         await asyncio.sleep(5)
@@ -673,7 +673,7 @@ async def cmd_setcargo(ctx: commands.Context, role: discord.Role = None):
 
     upsert_config(ctx.guild.id, staff_role_id=role.id)
 
-    embed = make_base_embed(ctx.guild, "Cargo Staff Configurado", discord.Color.green())
+    embed = make_base_embed(ctx.guild, "Cargo Staff Configurado", discord.Color(0x000000))
     embed.description = f"O cargo {role.mention} agora pode usar `br!painel`."
     msg = await ctx.send(embed=embed)
     await asyncio.sleep(5)
@@ -686,7 +686,7 @@ async def cmd_setcargo(ctx: commands.Context, role: discord.Role = None):
 @bot.command(name="settempo")
 @is_owner()
 async def cmd_settempo(ctx: commands.Context):
-    embed = make_base_embed(ctx.guild, "Configurar Tempo", discord.Color.blurple())
+    embed = make_base_embed(ctx.guild, "Configurar Tempo", discord.Color(0x000000))
     embed.description = "Selecione o tempo padrao para expiracao de cargos:"
 
     view = TempoView(ctx)
@@ -706,7 +706,7 @@ async def cmd_log(ctx: commands.Context, channel: discord.TextChannel = None):
     target_channel = channel or ctx.channel
     upsert_config(ctx.guild.id, log_channel_id=target_channel.id)
 
-    embed = make_base_embed(ctx.guild, "Canal de Log Configurado", discord.Color.green())
+    embed = make_base_embed(ctx.guild, "Canal de Log Configurado", discord.Color(0x000000))
     embed.description = f"O canal {target_channel.mention} agora recebera todos os logs de cargos."
     await ctx.send(embed=embed)
 
@@ -731,7 +731,7 @@ async def cmd_start(ctx: commands.Context):
     def status(valor):
         return "Configurado" if valor else "Pendente"
 
-    embed = make_base_embed(ctx.guild, "Configuracao Inicial - br! Bot", discord.Color.blurple())
+    embed = make_base_embed(ctx.guild, "Configuracao Inicial - br! Bot", discord.Color(0x000000))
     embed.description = (
         "Bem-vindo! Siga os passos abaixo para configurar o bot no servidor.\n"
         "Use cada comando na ordem indicada."
@@ -788,7 +788,7 @@ async def cmd_help(ctx: commands.Context):
     log_ch     = ctx.guild.get_channel(cfg["log_channel_id"]) if cfg["log_channel_id"] else None
     tempo      = cfg["tempo_dias"]
 
-    embed = make_base_embed(ctx.guild, "Comandos - br! Bot", discord.Color.blurple())
+    embed = make_base_embed(ctx.guild, "Comandos - br! Bot", discord.Color(0x000000))
     embed.description = f"Prefixo: `{PREFIX}`"
 
     embed.add_field(
@@ -836,7 +836,7 @@ async def cmd_help(ctx: commands.Context):
 @bot.event
 async def on_command_error(ctx: commands.Context, error):
     if isinstance(error, commands.CheckFailure):
-        embed = make_base_embed(ctx.guild, "Sem Permissao", discord.Color.red())
+        embed = make_base_embed(ctx.guild, "Sem Permissao", discord.Color(0x000000))
         embed.description = str(error) if str(error) else "Voce nao tem permissao para usar este comando."
         msg = await ctx.send(embed=embed)
         await asyncio.sleep(5)
@@ -845,7 +845,7 @@ async def on_command_error(ctx: commands.Context, error):
         except Exception:
             pass
     elif isinstance(error, commands.MemberNotFound):
-        embed = make_base_embed(ctx.guild, "Usuario Nao Encontrado", discord.Color.red())
+        embed = make_base_embed(ctx.guild, "Usuario Nao Encontrado", discord.Color(0x000000))
         embed.description = "Nao consegui encontrar esse usuario."
         msg = await ctx.send(embed=embed)
         await asyncio.sleep(5)
@@ -854,7 +854,7 @@ async def on_command_error(ctx: commands.Context, error):
         except Exception:
             pass
     elif isinstance(error, commands.RoleNotFound):
-        embed = make_base_embed(ctx.guild, "Cargo Nao Encontrado", discord.Color.red())
+        embed = make_base_embed(ctx.guild, "Cargo Nao Encontrado", discord.Color(0x000000))
         embed.description = "Nao consegui encontrar esse cargo."
         msg = await ctx.send(embed=embed)
         await asyncio.sleep(5)
