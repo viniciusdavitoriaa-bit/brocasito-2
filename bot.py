@@ -32,24 +32,40 @@ def init_db():
     """)
     c.execute("""
         CREATE TABLE IF NOT EXISTS cargos_setados (
-            id             INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id       INTEGER NOT NULL,
-            user_id        INTEGER NOT NULL,
-            cargo_id       INTEGER NOT NULL,
-            servidor_nome  TEXT    NOT NULL,
-            servidor_id    TEXT    DEFAULT NULL,
-            data_setado    TEXT    NOT NULL,
-            data_expiracao TEXT    NOT NULL,
-            setado_por     INTEGER NOT NULL,
-            removido       INTEGER DEFAULT 0,
-            data_removido  TEXT    DEFAULT NULL
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id         INTEGER NOT NULL,
+            user_id          INTEGER NOT NULL,
+            cargo_id         INTEGER NOT NULL,
+            servidor_nome    TEXT    NOT NULL,
+            servidor_id      TEXT    DEFAULT NULL,
+            data_setado      TEXT    NOT NULL,
+            data_expiracao   TEXT    DEFAULT NULL,
+            setado_por       INTEGER NOT NULL,
+            removido         INTEGER DEFAULT 0,
+            data_removido    TEXT    DEFAULT NULL,
+            tempo_permanente INTEGER DEFAULT 0
         )
     """)
-    try:
-        c.execute("ALTER TABLE cargos_setados ADD COLUMN servidor_id TEXT DEFAULT NULL")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass
+    # Tabela de tempo por cargo
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS role_tempo (
+            guild_id  INTEGER NOT NULL,
+            cargo_id  INTEGER NOT NULL,
+            tempo_dias INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, cargo_id)
+        )
+    """)
+    # Migrações seguras para bancos antigos
+    for col, definition in [
+        ("servidor_id",      "TEXT DEFAULT NULL"),
+        ("tempo_permanente", "INTEGER DEFAULT 0"),
+        ("data_expiracao",   "TEXT DEFAULT NULL"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE cargos_setados ADD COLUMN {col} {definition}")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
     conn.close()
 
@@ -76,12 +92,36 @@ def upsert_config(guild_id: int, **kwargs):
     conn.commit()
     conn.close()
 
+def get_role_tempo(guild_id: int, cargo_id: int) -> int | None:
+    """Retorna o tempo em dias para o cargo específico, ou None se não configurado.
+    -1 = permanente."""
+    conn = get_db()
+    row  = conn.execute(
+        "SELECT tempo_dias FROM role_tempo WHERE guild_id = ? AND cargo_id = ?",
+        (guild_id, cargo_id)
+    ).fetchone()
+    conn.close()
+    return row["tempo_dias"] if row else None
+
+def set_role_tempo(guild_id: int, cargo_id: int, tempo_dias: int):
+    """Define o tempo para um cargo específico. -1 = permanente."""
+    conn = get_db()
+    conn.execute("""
+        INSERT INTO role_tempo (guild_id, cargo_id, tempo_dias)
+        VALUES (?, ?, ?)
+        ON CONFLICT(guild_id, cargo_id) DO UPDATE SET tempo_dias = excluded.tempo_dias
+    """, (guild_id, cargo_id, tempo_dias))
+    conn.commit()
+    conn.close()
+
 # ── Bot setup ─────────────────────────────────────────────────────────────────
 intents = discord.Intents.all()
 bot     = commands.Bot(command_prefix=PREFIX, intents=intents, help_command=None)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def fmt_dt(dt_str: str) -> str:
+def fmt_dt(dt_str: str | None) -> str:
+    if not dt_str:
+        return "—"
     try:
         dt = datetime.fromisoformat(dt_str)
         return dt.strftime("%d/%m/%Y %H:%M")
@@ -89,14 +129,41 @@ def fmt_dt(dt_str: str) -> str:
         return dt_str
 
 def tempo_str(tempo: int) -> str:
+    if tempo == -1:
+        return "Permanente"
     if tempo == 0:
         return "30 segundos"
     return f"{tempo} dias"
 
-def tempo_timedelta(tempo: int) -> timedelta:
+def tempo_timedelta(tempo: int) -> timedelta | None:
+    """Retorna None para permanente."""
+    if tempo == -1:
+        return None
     if tempo == 0:
         return timedelta(seconds=30)
     return timedelta(days=tempo)
+
+def tempo_restante_str(data_expiracao: str | None, permanente: int) -> str:
+    if permanente:
+        return "♾️ Permanente"
+    if not data_expiracao:
+        return "Desconhecido"
+    try:
+        exp = datetime.fromisoformat(data_expiracao)
+        diff = exp - datetime.utcnow()
+        if diff.total_seconds() <= 0:
+            return "Expirado"
+        total_s = int(diff.total_seconds())
+        dias    = total_s // 86400
+        horas   = (total_s % 86400) // 3600
+        minutos = (total_s % 3600) // 60
+        if dias > 0:
+            return f"{dias}d {horas}h {minutos}m"
+        if horas > 0:
+            return f"{horas}h {minutos}m"
+        return f"{minutos}m"
+    except Exception:
+        return "—"
 
 def make_base_embed(guild: discord.Guild, title: str, color: discord.Color) -> discord.Embed:
     embed = discord.Embed(title=title, color=color, timestamp=datetime.utcnow())
@@ -135,7 +202,11 @@ async def check_expiry():
     now  = datetime.utcnow().isoformat()
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM cargos_setados WHERE removido = 0 AND data_expiracao <= ?",
+        """SELECT * FROM cargos_setados
+           WHERE removido = 0
+             AND tempo_permanente = 0
+             AND data_expiracao IS NOT NULL
+             AND data_expiracao <= ?""",
         (now,)
     ).fetchall()
     conn.close()
@@ -171,13 +242,13 @@ async def check_expiry():
             color=discord.Color(0x000000),
             timestamp=datetime.utcnow()
         )
-        embed.add_field(name="Usuario",        value=f"<@{row['user_id']}> (`{row['user_id']}`)",                    inline=False)
-        embed.add_field(name="Nome",           value=str(member) if member else f"`{row['user_id']}`",               inline=True)
+        embed.add_field(name="Usuario",        value=f"<@{row['user_id']}> (`{row['user_id']}`)",                     inline=False)
+        embed.add_field(name="Nome",           value=str(member) if member else f"`{row['user_id']}`",                inline=True)
         embed.add_field(name="Cargo",          value=f"<@&{row['cargo_id']}>" if role else f"ID `{row['cargo_id']}`", inline=True)
-        embed.add_field(name="Servidor Dono",  value=row["servidor_nome"],                                            inline=True)
-        embed.add_field(name="ID do Servidor", value=servidor_id_val,                                                 inline=True)
-        embed.add_field(name="Data Setado",    value=fmt_dt(row["data_setado"]),                                      inline=True)
-        embed.add_field(name="Data Removido",  value=fmt_dt(data_removido),                                          inline=True)
+        embed.add_field(name="Servidor Dono",  value=row["servidor_nome"],                                             inline=True)
+        embed.add_field(name="ID do Servidor", value=servidor_id_val,                                                  inline=True)
+        embed.add_field(name="Data Setado",    value=fmt_dt(row["data_setado"]),                                       inline=True)
+        embed.add_field(name="Data Removido",  value=fmt_dt(data_removido),                                           inline=True)
         if guild.icon:
             embed.set_thumbnail(url=guild.icon.url)
         embed.set_footer(text=f"Servidor: {guild.name}")
@@ -197,8 +268,8 @@ async def check_expiry():
             color=discord.Color(0x000000),
             timestamp=datetime.utcnow()
         )
-        desativar_embed.add_field(name="Nome do Servidor", value=row["servidor_nome"],                   inline=True)
-        desativar_embed.add_field(name="ID do Servidor",   value=servidor_id_val,                        inline=True)
+        desativar_embed.add_field(name="Nome do Servidor", value=row["servidor_nome"],                        inline=True)
+        desativar_embed.add_field(name="ID do Servidor",   value=servidor_id_val,                             inline=True)
         desativar_embed.add_field(name="Usuario",          value=f"<@{row['user_id']}> (`{row['user_id']}`)", inline=False)
         if guild.icon:
             desativar_embed.set_thumbnail(url=guild.icon.url)
@@ -235,12 +306,18 @@ class PainelView(View):
             await self._finalizar(interaction)
 
     async def _finalizar(self, interaction: discord.Interaction):
-        guild     = self.ctx.guild
-        cfg       = get_config(guild.id)
-        tempo     = cfg["tempo_dias"]
-        now       = datetime.utcnow()
-        expiracao = now + tempo_timedelta(tempo)
-        t_str     = tempo_str(tempo)
+        guild    = self.ctx.guild
+        now      = datetime.utcnow()
+
+        # Verifica tempo especifico do cargo; padrao hardcoded de 30 dias se nao configurado
+        role_t = get_role_tempo(guild.id, self.cargo_id)
+        if role_t is None:
+            role_t = 30
+
+        permanente = (role_t == -1)
+        td         = tempo_timedelta(role_t)
+        expiracao  = (now + td) if td is not None else None
+        t_str      = tempo_str(role_t)
 
         role = guild.get_role(self.cargo_id)
         if role:
@@ -252,24 +329,31 @@ class PainelView(View):
         conn = get_db()
         conn.execute("""
             INSERT INTO cargos_setados
-                (guild_id, user_id, cargo_id, servidor_nome, servidor_id, data_setado, data_expiracao, setado_por)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (guild.id, self.target.id, self.cargo_id,
-              self.servidor, self.servidor_id, now.isoformat(), expiracao.isoformat(),
-              interaction.user.id))
+                (guild_id, user_id, cargo_id, servidor_nome, servidor_id,
+                 data_setado, data_expiracao, setado_por, tempo_permanente)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            guild.id, self.target.id, self.cargo_id,
+            self.servidor, self.servidor_id, now.isoformat(),
+            expiracao.isoformat() if expiracao else None,
+            interaction.user.id,
+            1 if permanente else 0
+        ))
         conn.commit()
         conn.close()
 
+        expira_valor = expiracao.strftime("%d/%m/%Y %H:%M") if expiracao else "Permanente"
+
         embed = make_base_embed(guild, "Cargo Setado", discord.Color(0x000000))
-        embed.add_field(name="Usuario",        value=self.target.mention,                 inline=True)
-        embed.add_field(name="Nome",           value=str(self.target),                    inline=True)
-        embed.add_field(name="Cargo",          value=f"<@&{self.cargo_id}>",              inline=True)
-        embed.add_field(name="Servidor Dono",  value=self.servidor,                       inline=True)
-        embed.add_field(name="ID do Servidor", value=self.servidor_id,                    inline=True)
-        embed.add_field(name="Tempo",          value=t_str,                               inline=True)
-        embed.add_field(name="Data Setado",    value=now.strftime("%d/%m/%Y %H:%M"),      inline=True)
-        embed.add_field(name="Expira em",      value=expiracao.strftime("%d/%m/%Y %H:%M"), inline=True)
-        embed.add_field(name="Setado por",     value=interaction.user.mention,            inline=True)
+        embed.add_field(name="Usuario",        value=self.target.mention,  inline=True)
+        embed.add_field(name="Nome",           value=str(self.target),     inline=True)
+        embed.add_field(name="Cargo",          value=f"<@&{self.cargo_id}>", inline=True)
+        embed.add_field(name="Servidor Dono",  value=self.servidor,        inline=True)
+        embed.add_field(name="ID do Servidor", value=self.servidor_id,     inline=True)
+        embed.add_field(name="Tempo",          value=t_str,                inline=True)
+        embed.add_field(name="Data Setado",    value=now.strftime("%d/%m/%Y %H:%M"), inline=True)
+        embed.add_field(name="Expira em",      value=expira_valor,         inline=True)
+        embed.add_field(name="Setado por",     value=interaction.user.mention, inline=True)
 
         for item in self.children:
             item.disabled = True
@@ -279,13 +363,13 @@ class PainelView(View):
         await notify_admins(embed)
 
         dm_embed = make_base_embed(guild, "Cargo Temporario Recebido", discord.Color(0x000000))
-        dm_embed.add_field(name="Cargo",          value=f"<@&{self.cargo_id}>",               inline=True)
-        dm_embed.add_field(name="Servidor Dono",  value=self.servidor,                         inline=True)
-        dm_embed.add_field(name="ID do Servidor", value=self.servidor_id,                      inline=True)
-        dm_embed.add_field(name="Data Setado",    value=now.strftime("%d/%m/%Y %H:%M"),        inline=True)
-        dm_embed.add_field(name="Expira em",      value=expiracao.strftime("%d/%m/%Y %H:%M"),  inline=True)
-        dm_embed.add_field(name="Tempo",          value=t_str,                                 inline=True)
-        dm_embed.add_field(name="Setado por",     value=str(interaction.user),                 inline=True)
+        dm_embed.add_field(name="Cargo",          value=f"<@&{self.cargo_id}>",    inline=True)
+        dm_embed.add_field(name="Servidor Dono",  value=self.servidor,              inline=True)
+        dm_embed.add_field(name="ID do Servidor", value=self.servidor_id,           inline=True)
+        dm_embed.add_field(name="Data Setado",    value=now.strftime("%d/%m/%Y %H:%M"), inline=True)
+        dm_embed.add_field(name="Expira em",      value=expira_valor,               inline=True)
+        dm_embed.add_field(name="Tempo",          value=t_str,                      inline=True)
+        dm_embed.add_field(name="Setado por",     value=str(interaction.user),      inline=True)
         await notify_target_user(self.target, dm_embed)
 
         await send_log(guild, embed)
@@ -374,36 +458,58 @@ class CargoSelectView(View):
     async def on_select(self, interaction: discord.Interaction):
         self.painel_view.cargo_id = int(interaction.data["values"][0])
         role = interaction.guild.get_role(self.painel_view.cargo_id)
+
+        role_t = get_role_tempo(interaction.guild.id, self.painel_view.cargo_id)
+        if role_t is None:
+            tempo_info = "⚠️ Sem tempo configurado (padrao: 30 dias)"
+        else:
+            tempo_info = f"**{tempo_str(role_t)}**"
+
         await interaction.response.send_message(
-            f"Cargo **{role.name if role else self.painel_view.cargo_id}** selecionado!",
+            f"Cargo **{role.name if role else self.painel_view.cargo_id}** selecionado!\n"
+            f"Tempo: {tempo_info}",
             ephemeral=True
         )
         await self.painel_view._try_finalizar(interaction)
 
 
+# ── View — Seletor de Tempo (por cargo ou global) ─────────────────────────────
 class TempoView(View):
-    def __init__(self, ctx: commands.Context):
+    def __init__(self, ctx: commands.Context, role: discord.Role | None = None):
         super().__init__(timeout=30)
-        self.ctx = ctx
+        self.ctx  = ctx
+        self.role = role  # None = configuração global
 
     @discord.ui.select(
         placeholder="Selecione o tempo...",
         options=[
-            discord.SelectOption(label="30 segundos", value="0",  description="Cargo expira em 30 segundos"),
-            discord.SelectOption(label="30 dias",     value="30", description="Cargo expira em 30 dias"),
-            discord.SelectOption(label="60 dias",     value="60", description="Cargo expira em 60 dias"),
-            discord.SelectOption(label="90 dias",     value="90", description="Cargo expira em 90 dias"),
+            discord.SelectOption(label="30 segundos",  value="0",   description="Cargo expira em 30 segundos (teste)"),
+            discord.SelectOption(label="30 dias",      value="30",  description="Cargo expira em 30 dias"),
+            discord.SelectOption(label="60 dias",      value="60",  description="Cargo expira em 60 dias"),
+            discord.SelectOption(label="90 dias",      value="90",  description="Cargo expira em 90 dias"),
+            discord.SelectOption(label="Permanente",   value="-1",  description="Cargo nunca expira (permanente)"),
         ]
     )
     async def select_tempo(self, interaction: discord.Interaction, select: Select):
         if interaction.user != self.ctx.author:
             await interaction.response.send_message("Sem permissao.", ephemeral=True)
             return
-        dias = int(select.values[0])
-        upsert_config(self.ctx.guild.id, tempo_dias=dias)
 
-        embed = make_base_embed(self.ctx.guild, "Tempo Configurado", discord.Color(0x000000))
-        embed.description = f"O tempo de cargo foi definido para **{tempo_str(dias)}**."
+        dias = int(select.values[0])
+
+        if self.role is not None:
+            # Salva tempo para o cargo específico
+            set_role_tempo(self.ctx.guild.id, self.role.id, dias)
+            titulo = f"Tempo Configurado — {self.role.name}"
+            desc   = f"O cargo {self.role.mention} agora usa **{tempo_str(dias)}** como tempo de expiração."
+        else:
+            # Salva tempo global
+            upsert_config(self.ctx.guild.id, tempo_dias=dias)
+            titulo = "Tempo Global Configurado"
+            desc   = f"O tempo padrão de cargo foi definido para **{tempo_str(dias)}**."
+
+        embed = make_base_embed(self.ctx.guild, titulo, discord.Color(0x000000))
+        embed.description = desc
 
         for item in self.children:
             item.disabled = True
@@ -414,6 +520,7 @@ class TempoView(View):
         except Exception:
             pass
         self.stop()
+
 
 # ── Modals — EmbedEnv ─────────────────────────────────────────────────────────
 class ModalTitulo(Modal, title="Definir Titulo"):
@@ -531,6 +638,7 @@ class ModalCanal(Modal, title="Definir Canal"):
             await interaction.response.send_message(
                 "ID invalido. Coloque apenas os numeros do ID do canal.", ephemeral=True
             )
+
 
 # ── View — EmbedEnv ───────────────────────────────────────────────────────────
 class EmbedEnvView(View):
@@ -669,6 +777,7 @@ class EmbedEnvView(View):
                 "Sem permissao para enviar mensagens nesse canal.", ephemeral=True
             )
 
+
 # ── Checks ────────────────────────────────────────────────────────────────────
 def is_owner():
     async def predicate(ctx: commands.Context):
@@ -686,6 +795,7 @@ def is_staff():
                 return True
         raise commands.CheckFailure("Voce nao tem permissao para usar este comando.")
     return commands.check(predicate)
+
 
 # ── Commands ──────────────────────────────────────────────────────────────────
 
@@ -726,6 +836,68 @@ async def cmd_painel(ctx: commands.Context, target: discord.Member = None):
             pass
 
 
+@bot.command(name="perfil")
+@is_staff()
+async def cmd_perfil(ctx: commands.Context, target: discord.Member = None):
+    """Mostra o painel com todos os cargos ativos e o tempo restante de cada um."""
+    if target is None:
+        embed = make_base_embed(ctx.guild, "Erro", discord.Color(0x000000))
+        embed.description = "Mencione um usuario: `br!perfil @usuario`"
+        await ctx.send(embed=embed)
+        return
+
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT * FROM cargos_setados
+           WHERE guild_id = ? AND user_id = ? AND removido = 0
+           ORDER BY data_setado DESC""",
+        (ctx.guild.id, target.id)
+    ).fetchall()
+    conn.close()
+
+    embed = make_base_embed(ctx.guild, f"Perfil de Cargos — {target.display_name}", discord.Color(0x000000))
+
+    if target.avatar:
+        embed.set_thumbnail(url=target.display_avatar.url)
+
+    embed.description = f"Usuario: {target.mention} (`{target.id}`)"
+
+    if not rows:
+        embed.add_field(
+            name="Nenhum cargo ativo",
+            value="Este usuario nao possui cargos temporarios ativos no momento.",
+            inline=False
+        )
+    else:
+        for row in rows:
+            row  = dict(row)
+            role = ctx.guild.get_role(row["cargo_id"])
+            nome_cargo = role.mention if role else f"Cargo removido (`{row['cargo_id']}`)"
+
+            permanente = row.get("tempo_permanente", 0)
+            restante   = tempo_restante_str(row.get("data_expiracao"), permanente)
+            expiracao  = "Permanente" if permanente else fmt_dt(row.get("data_expiracao"))
+
+            setado_por_user = ctx.guild.get_member(row["setado_por"])
+            setado_por_str  = setado_por_user.mention if setado_por_user else f"`{row['setado_por']}`"
+
+            embed.add_field(
+                name=f"╔ {role.name if role else 'Cargo Removido'}",
+                value=(
+                    f"**Cargo:** {nome_cargo}\n"
+                    f"**Servidor:** {row['servidor_nome']} (`{row.get('servidor_id') or 'N/A'}`)\n"
+                    f"**Setado em:** {fmt_dt(row['data_setado'])}\n"
+                    f"**Expira:** {expiracao}\n"
+                    f"**Tempo restante:** {restante}\n"
+                    f"**Setado por:** {setado_por_str}"
+                ),
+                inline=False
+            )
+
+    embed.set_footer(text=f"{ctx.guild.name} • {len(rows)} cargo(s) ativo(s)")
+    await ctx.send(embed=embed)
+
+
 @bot.command(name="setcargo")
 @is_owner()
 async def cmd_setcargo(ctx: commands.Context, role: discord.Role = None):
@@ -751,11 +923,26 @@ async def cmd_setcargo(ctx: commands.Context, role: discord.Role = None):
 
 @bot.command(name="settempo")
 @is_owner()
-async def cmd_settempo(ctx: commands.Context):
-    embed = make_base_embed(ctx.guild, "Configurar Tempo", discord.Color(0x000000))
-    embed.description = "Selecione o tempo padrao para expiracao de cargos:"
+async def cmd_settempo(ctx: commands.Context, role: discord.Role = None):
+    """Define o tempo de expiracao para um cargo especifico."""
+    if role is None:
+        embed = make_base_embed(ctx.guild, "Erro", discord.Color(0x000000))
+        embed.description = f"Mencione um cargo: `{PREFIX}settempo @cargo`"
+        msg = await ctx.send(embed=embed)
+        await asyncio.sleep(5)
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        return
 
-    view = TempoView(ctx)
+    embed = make_base_embed(ctx.guild, f"Configurar Tempo — {role.name}", discord.Color(0x000000))
+    embed.description = (
+        f"Selecione o tempo de expiracao para o cargo {role.mention}.\n"
+        f"Este tempo sera usado sempre que esse cargo for setado via `{PREFIX}painel`."
+    )
+
+    view = TempoView(ctx, role=role)
     msg  = await ctx.send(embed=embed, view=view)
     await view.wait()
 
@@ -764,6 +951,38 @@ async def cmd_settempo(ctx: commands.Context):
         await msg.delete()
     except Exception:
         pass
+
+
+@bot.command(name="tempos")
+@is_owner()
+async def cmd_tempos(ctx: commands.Context):
+    """Mostra o painel com todos os cargos e seus tempos configurados."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT cargo_id, tempo_dias FROM role_tempo WHERE guild_id = ? ORDER BY tempo_dias",
+        (ctx.guild.id,)
+    ).fetchall()
+    conn.close()
+
+    embed = make_base_embed(ctx.guild, "Configuracoes de Tempo por Cargo", discord.Color(0x000000))
+
+    if not rows:
+        embed.description = (
+            "Nenhum cargo com tempo configurado.\n"
+            f"Use `{PREFIX}settempo @cargo` para definir o tempo de um cargo."
+        )
+    else:
+        linhas = []
+        for row in rows:
+            role = ctx.guild.get_role(row["cargo_id"])
+            nome = role.mention if role else f"~~Cargo removido~~ (`{row['cargo_id']}`)"
+            t    = tempo_str(row["tempo_dias"])
+            linhas.append(f"{nome} — **{t}**")
+
+        embed.description = "\n".join(linhas)
+        embed.set_footer(text=f"{ctx.guild.name} • {len(rows)} cargo(s) configurado(s)")
+
+    await ctx.send(embed=embed)
 
 
 @bot.command(name="log")
@@ -815,11 +1034,11 @@ async def cmd_start(ctx: commands.Context):
     )
 
     embed.add_field(
-        name="Passo 2 — Tempo de Expiracao",
+        name="Passo 2 — Tempo por Cargo",
         value=(
-            f"`{PREFIX}settempo`\n"
-            f"Escolhe por quanto tempo o cargo fica ativo (30s, 30, 60 ou 90 dias).\n"
-            f"Situacao: **Configurado** ({tempo_str(tempo)})"
+            f"`{PREFIX}settempo @cargo` — define o tempo de expiracao de um cargo\n"
+            f"Opcoes: 30s, 30, 60, 90 dias ou **Permanente**.\n"
+            f"`{PREFIX}tempos` — ve todos os cargos e seus tempos configurados"
         ),
         inline=False
     )
@@ -838,8 +1057,8 @@ async def cmd_start(ctx: commands.Context):
     embed.add_field(
         name="Pronto para usar",
         value=(
-            f"`{PREFIX}painel @usuario`\n"
-            "Abre o painel para setar cargo, servidor e ID do servidor em um usuario."
+            f"`{PREFIX}painel @usuario` — Abre o painel para setar cargo em um usuario\n"
+            f"`{PREFIX}perfil @usuario` — Mostra os cargos ativos e o tempo restante de cada um"
         ),
         inline=False
     )
@@ -852,7 +1071,6 @@ async def cmd_help(ctx: commands.Context):
     cfg        = get_config(ctx.guild.id)
     staff_role = ctx.guild.get_role(cfg["staff_role_id"]) if cfg["staff_role_id"] else None
     log_ch     = ctx.guild.get_channel(cfg["log_channel_id"]) if cfg["log_channel_id"] else None
-    tempo      = cfg["tempo_dias"]
 
     embed = make_base_embed(ctx.guild, "Comandos - br! Bot", discord.Color(0x000000))
     embed.description = f"Prefixo: `{PREFIX}`"
@@ -867,10 +1085,11 @@ async def cmd_help(ctx: commands.Context):
         name="Comandos Staff",
         value=(
             f"`{PREFIX}painel @usuario` — Abre painel para setar cargo e servidor na pessoa\n"
-            f"  - Botao **Adicionar Cargo**: escolhe o cargo pelo menu\n"
+            f"  - Botao **Adicionar Cargo**: escolhe o cargo pelo menu (mostra o tempo do cargo)\n"
             f"  - Botao **Adicionar Servidor**: digita o nome do servidor no chat\n"
             f"  - Botao **Adicionar ID do Servidor**: digita o ID do servidor no chat\n"
-            f"  - Painel fecha em 30 segundos"
+            f"  - Painel fecha em 30 segundos\n\n"
+            f"`{PREFIX}perfil @usuario` — Painel com todos os cargos ativos do usuario e tempo restante"
         ),
         inline=False
     )
@@ -880,7 +1099,9 @@ async def cmd_help(ctx: commands.Context):
         value=(
             f"`{PREFIX}start` — Guia de configuracao inicial do bot\n"
             f"`{PREFIX}setcargo @cargo` — Define qual cargo pode usar o painel\n"
-            f"`{PREFIX}settempo` — Define o tempo de expiracao (30s, 30, 60 ou 90 dias)\n"
+            f"`{PREFIX}settempo @cargo` — Define o tempo de expiracao de um cargo\n"
+            f"  - Opcoes: 30s / 30 / 60 / 90 dias / **Permanente**\n"
+            f"`{PREFIX}tempos` — Mostra todos os cargos e seus tempos configurados\n"
             f"`{PREFIX}log [#canal]` — Define o canal que recebe os logs de cargos\n"
             f"`{PREFIX}embedenv` — Abre painel para criar e enviar uma embed personalizada"
         ),
@@ -891,13 +1112,13 @@ async def cmd_help(ctx: commands.Context):
         name="Configuracao Atual",
         value=(
             f"Cargo staff: {staff_role.mention if staff_role else 'Nao configurado'}\n"
-            f"Canal de log: {log_ch.mention if log_ch else 'Nao configurado'}\n"
-            f"Tempo padrao: {tempo_str(tempo)}"
+            f"Canal de log: {log_ch.mention if log_ch else 'Nao configurado'}"
         ),
         inline=False
     )
 
     await ctx.send(embed=embed)
+
 
 # ── Error handling ────────────────────────────────────────────────────────────
 @bot.event
@@ -932,6 +1153,7 @@ async def on_command_error(ctx: commands.Context, error):
     else:
         raise error
 
+
 # ── Events ────────────────────────────────────────────────────────────────────
 @bot.event
 async def on_ready():
@@ -945,6 +1167,7 @@ async def on_ready():
             name="br!help | Cargos Temporarios"
         )
     )
+
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
