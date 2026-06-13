@@ -5,14 +5,6 @@ import sqlite3
 import asyncio
 import os
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
-
-# ── Fuso horário de Brasília ──────────────────────────────────────────────────
-BRT = ZoneInfo("America/Sao_Paulo")
-
-def now_brt() -> datetime:
-    """Retorna o datetime atual no horário de Brasília (UTC-3)."""
-    return datetime.now(BRT)
 
 # ── Config ───────────────────────────────────────────────────────────────────
 TOKEN           = os.getenv("DISCORD_TOKEN", "")
@@ -158,9 +150,7 @@ def tempo_restante_str(data_expiracao: str | None, permanente: int) -> str:
         return "Desconhecido"
     try:
         exp = datetime.fromisoformat(data_expiracao)
-        if exp.tzinfo is None:
-            exp = exp.replace(tzinfo=BRT)
-        diff = exp - now_brt()
+        diff = exp - datetime.utcnow()
         if diff.total_seconds() <= 0:
             return "Expirado"
         total_s = int(diff.total_seconds())
@@ -176,7 +166,7 @@ def tempo_restante_str(data_expiracao: str | None, permanente: int) -> str:
         return "—"
 
 def make_base_embed(guild: discord.Guild, title: str, color: discord.Color) -> discord.Embed:
-    embed = discord.Embed(title=title, color=color, timestamp=now_brt())
+    embed = discord.Embed(title=title, color=color, timestamp=datetime.utcnow())
     if guild and guild.icon:
         embed.set_thumbnail(url=guild.icon.url)
     embed.set_footer(text=guild.name if guild else "Discord Bot")
@@ -209,7 +199,7 @@ async def notify_target_user(user: discord.User | discord.Member, embed: discord
 # ── Expiry checker ────────────────────────────────────────────────────────────
 @tasks.loop(minutes=1)
 async def check_expiry():
-    now  = now_brt().isoformat()
+    now  = datetime.utcnow().isoformat()
     conn = get_db()
     rows = conn.execute(
         """SELECT * FROM cargos_setados
@@ -229,7 +219,7 @@ async def check_expiry():
 
         member        = guild.get_member(row["user_id"])
         role          = guild.get_role(row["cargo_id"])
-        data_removido = now_brt().isoformat()
+        data_removido = datetime.utcnow().isoformat()
 
         if member and role:
             try:
@@ -250,7 +240,7 @@ async def check_expiry():
         embed = discord.Embed(
             title="Tempo de Cargo Expirado",
             color=discord.Color(0x000000),
-            timestamp=now_brt()
+            timestamp=datetime.utcnow()
         )
         embed.add_field(name="Usuario",        value=f"<@{row['user_id']}> (`{row['user_id']}`)",                     inline=False)
         embed.add_field(name="Nome",           value=str(member) if member else f"`{row['user_id']}`",                inline=True)
@@ -276,7 +266,7 @@ async def check_expiry():
             title="⚠️ Desativar Servidor",
             description="O tempo do cargo expirou. Por favor, **desative o servidor** abaixo:",
             color=discord.Color(0x000000),
-            timestamp=now_brt()
+            timestamp=datetime.utcnow()
         )
         desativar_embed.add_field(name="Nome do Servidor", value=row["servidor_nome"],                        inline=True)
         desativar_embed.add_field(name="ID do Servidor",   value=servidor_id_val,                             inline=True)
@@ -317,7 +307,7 @@ class PainelView(View):
 
     async def _finalizar(self, interaction: discord.Interaction):
         guild    = self.ctx.guild
-        now      = now_brt()
+        now      = datetime.utcnow()
 
         # Verifica tempo especifico do cargo; padrao hardcoded de 30 dias se nao configurado
         role_t = get_role_tempo(guild.id, self.cargo_id)
@@ -673,7 +663,7 @@ class EmbedEnvView(View):
         embed = discord.Embed(
             title="Painel de Embed",
             color=discord.Color(0x000000),
-            timestamp=now_brt()
+            timestamp=datetime.utcnow()
         )
         embed.add_field(name="Titulo",  value=self._nd(self.state["titulo"]),  inline=True)
         embed.add_field(name="Cor",     value=self._nd(self.state["cor"]),      inline=True)
@@ -766,7 +756,7 @@ class EmbedEnvView(View):
         embed_final = discord.Embed(
             title=self.state["titulo"],
             color=discord.Color(cor_int),
-            timestamp=now_brt()
+            timestamp=datetime.utcnow()
         )
 
         if self.state["banner"]:
@@ -1184,4 +1174,4 @@ if __name__ == "__main__":
     if not TOKEN:
         print("DISCORD_TOKEN nao definido. Configure a variavel de ambiente.")
         exit(1)
-    bot.run.(TOKEN)
+    bot.run(TOKEN)
