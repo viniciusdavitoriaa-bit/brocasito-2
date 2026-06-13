@@ -607,6 +607,27 @@ class ModalCor(Modal, title="Definir Cor"):
             )
 
 
+class ModalDescricao(Modal, title="Definir Descricao"):
+    campo = TextInput(
+        label="Descricao da embed",
+        placeholder="Digite a descricao...",
+        max_length=4000,
+        style=discord.TextStyle.paragraph,
+        required=True
+    )
+
+    def __init__(self, env_view):
+        super().__init__()
+        self.env_view = env_view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.env_view.state["descricao"] = self.campo.value.strip()
+        await interaction.response.send_message(
+            f"Descricao definida!", ephemeral=True
+        )
+        await self.env_view.atualizar_painel()
+
+
 class ModalCanal(Modal, title="Definir Canal"):
     campo = TextInput(
         label="ID ou mencao do canal",
@@ -647,11 +668,12 @@ class EmbedEnvView(View):
         self.ctx = ctx
         self.msg: discord.Message | None = None
         self.state = {
-            "titulo":   None,
-            "banner":   None,
-            "logo":     None,
-            "cor":      None,
-            "canal_id": None,
+            "titulo":    None,
+            "descricao": None,
+            "banner":    None,
+            "logo":      None,
+            "cor":       None,
+            "canal_id":  None,
         }
 
     def _nd(self, valor):
@@ -665,11 +687,13 @@ class EmbedEnvView(View):
             color=discord.Color(0x000000),
             timestamp=datetime.utcnow()
         )
-        embed.add_field(name="Titulo",  value=self._nd(self.state["titulo"]),  inline=True)
-        embed.add_field(name="Cor",     value=self._nd(self.state["cor"]),      inline=True)
-        embed.add_field(name="Canal",   value=canal.mention if canal else "Nao definido", inline=True)
-        embed.add_field(name="Banner",  value=self._nd(self.state["banner"]),   inline=False)
-        embed.add_field(name="Logo",    value=self._nd(self.state["logo"]),     inline=False)
+        embed.add_field(name="Titulo",    value=self._nd(self.state["titulo"]),  inline=True)
+        embed.add_field(name="Cor",       value=self._nd(self.state["cor"]),      inline=True)
+        embed.add_field(name="Canal",     value=canal.mention if canal else "Nao definido", inline=True)
+        desc_preview = (self.state["descricao"][:80] + "...") if self.state["descricao"] and len(self.state["descricao"]) > 80 else self.state["descricao"]
+        embed.add_field(name="Descricao", value=self._nd(desc_preview),           inline=False)
+        embed.add_field(name="Banner",    value=self._nd(self.state["banner"]),   inline=False)
+        embed.add_field(name="Logo",      value=self._nd(self.state["logo"]),     inline=False)
         embed.set_footer(text=self.ctx.guild.name)
         return embed
 
@@ -698,6 +722,13 @@ class EmbedEnvView(View):
             await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True)
             return
         await interaction.response.send_modal(ModalTitulo(self))
+
+    @discord.ui.button(label="Descricao", style=discord.ButtonStyle.secondary, row=0)
+    async def btn_descricao(self, interaction: discord.Interaction, button: Button):
+        if not self._check_autor(interaction):
+            await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True)
+            return
+        await interaction.response.send_modal(ModalDescricao(self))
 
     @discord.ui.button(label="Banner", style=discord.ButtonStyle.secondary, row=0)
     async def btn_banner(self, interaction: discord.Interaction, button: Button):
@@ -755,6 +786,7 @@ class EmbedEnvView(View):
 
         embed_final = discord.Embed(
             title=self.state["titulo"],
+            description=self.state["descricao"] if self.state["descricao"] else None,
             color=discord.Color(cor_int),
             timestamp=datetime.utcnow()
         )
