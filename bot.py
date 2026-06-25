@@ -1,3 +1,4 @@
+from __future__ import annotations
 import discord
 from discord.ext import commands, tasks
 from discord.ui import View, Button, Select, Modal, TextInput
@@ -48,8 +49,8 @@ def init_db():
     """)
     c.execute("""
         CREATE TABLE IF NOT EXISTS role_tempo (
-            guild_id  INTEGER NOT NULL,
-            cargo_id  INTEGER NOT NULL,
+            guild_id   INTEGER NOT NULL,
+            cargo_id   INTEGER NOT NULL,
             tempo_dias INTEGER NOT NULL,
             PRIMARY KEY (guild_id, cargo_id)
         )
@@ -143,8 +144,8 @@ def tempo_restante_str(data_expiracao: str | None, permanente: int) -> str:
     if not data_expiracao:
         return "Desconhecido"
     try:
-        exp = datetime.fromisoformat(data_expiracao)
-        diff = exp - datetime.utcnow()
+        exp    = datetime.fromisoformat(data_expiracao)
+        diff   = exp - datetime.utcnow()
         if diff.total_seconds() <= 0:
             return "Expirado"
         total_s = int(diff.total_seconds())
@@ -300,8 +301,8 @@ class PainelView(View):
             await self._finalizar(interaction)
 
     async def _finalizar(self, interaction: discord.Interaction):
-        guild    = self.ctx.guild
-        now      = datetime.utcnow()
+        guild = self.ctx.guild
+        now   = datetime.utcnow()
 
         role_t = get_role_tempo(guild.id, self.cargo_id)
         if role_t is None:
@@ -338,14 +339,14 @@ class PainelView(View):
         expira_valor = expiracao.strftime("%d/%m/%Y %H:%M") if expiracao else "Permanente"
 
         embed = make_base_embed(guild, "Cargo Setado", discord.Color(0x000000))
-        embed.add_field(name="Usuario",        value=self.target.mention,    inline=True)
-        embed.add_field(name="Nome",           value=str(self.target),       inline=True)
-        embed.add_field(name="Cargo",          value=f"<@&{self.cargo_id}>", inline=True)
-        embed.add_field(name="Servidor Dono",  value=self.servidor,          inline=True)
-        embed.add_field(name="ID do Servidor", value=self.servidor_id,       inline=True)
-        embed.add_field(name="Tempo",          value=t_str,                  inline=True)
+        embed.add_field(name="Usuario",        value=self.target.mention,      inline=True)
+        embed.add_field(name="Nome",           value=str(self.target),         inline=True)
+        embed.add_field(name="Cargo",          value=f"<@&{self.cargo_id}>",   inline=True)
+        embed.add_field(name="Servidor Dono",  value=self.servidor,            inline=True)
+        embed.add_field(name="ID do Servidor", value=self.servidor_id,         inline=True)
+        embed.add_field(name="Tempo",          value=t_str,                    inline=True)
         embed.add_field(name="Data Setado",    value=now.strftime("%d/%m/%Y %H:%M"), inline=True)
-        embed.add_field(name="Expira em",      value=expira_valor,           inline=True)
+        embed.add_field(name="Expira em",      value=expira_valor,             inline=True)
         embed.add_field(name="Setado por",     value=interaction.user.mention, inline=True)
 
         for item in self.children:
@@ -372,21 +373,11 @@ class PainelView(View):
         if interaction.user != self.ctx.author:
             await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True)
             return
-
-        roles = [
-            r for r in interaction.guild.roles
-            if r != interaction.guild.default_role and not r.managed
-        ][:25]
-
+        roles = [r for r in interaction.guild.roles if r != interaction.guild.default_role and not r.managed][:25]
         if not roles:
             await interaction.response.send_message("Nenhum cargo disponivel.", ephemeral=True)
             return
-
-        options = [
-            discord.SelectOption(label=r.name[:100], value=str(r.id))
-            for r in roles
-        ]
-
+        options = [discord.SelectOption(label=r.name[:100], value=str(r.id)) for r in roles]
         select_view = CargoSelectView(self, options)
         await interaction.response.send_message("Selecione o cargo:", view=select_view, ephemeral=True)
 
@@ -395,15 +386,11 @@ class PainelView(View):
         if interaction.user != self.ctx.author:
             await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True)
             return
-
         await interaction.response.send_message(
-            "Digite o **nome do servidor** no chat agora (voce tem 60 segundos):",
-            ephemeral=True
+            "Digite o **nome do servidor** no chat agora (voce tem 60 segundos):", ephemeral=True
         )
-
         def check(m: discord.Message):
             return m.author == self.ctx.author and m.channel == self.ctx.channel
-
         try:
             msg = await bot.wait_for("message", check=check, timeout=60)
             self.servidor = msg.content.strip()
@@ -418,15 +405,11 @@ class PainelView(View):
         if interaction.user != self.ctx.author:
             await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True)
             return
-
         await interaction.response.send_message(
-            "Digite o **ID do servidor** no chat agora (voce tem 60 segundos):",
-            ephemeral=True
+            "Digite o **ID do servidor** no chat agora (voce tem 60 segundos):", ephemeral=True
         )
-
         def check(m: discord.Message):
             return m.author == self.ctx.author and m.channel == self.ctx.channel
-
         try:
             msg = await bot.wait_for("message", check=check, timeout=60)
             self.servidor_id = msg.content.strip()
@@ -438,27 +421,20 @@ class PainelView(View):
 
 
 class CargoSelectView(View):
-    def __init__(self, painel_view: PainelView, options: list[discord.SelectOption]):
+    def __init__(self, painel_view: PainelView, options: list):
         super().__init__(timeout=30)
         self.painel_view = painel_view
-
         select = Select(placeholder="Escolha um cargo...", options=options)
         select.callback = self.on_select
         self.add_item(select)
 
     async def on_select(self, interaction: discord.Interaction):
         self.painel_view.cargo_id = int(interaction.data["values"][0])
-        role = interaction.guild.get_role(self.painel_view.cargo_id)
-
+        role   = interaction.guild.get_role(self.painel_view.cargo_id)
         role_t = get_role_tempo(interaction.guild.id, self.painel_view.cargo_id)
-        if role_t is None:
-            tempo_info = "⚠️ Sem tempo configurado (padrao: 30 dias)"
-        else:
-            tempo_info = f"**{tempo_str(role_t)}**"
-
+        tempo_info = f"**{tempo_str(role_t)}**" if role_t is not None else "⚠️ Sem tempo configurado (padrao: 30 dias)"
         await interaction.response.send_message(
-            f"Cargo **{role.name if role else self.painel_view.cargo_id}** selecionado!\n"
-            f"Tempo: {tempo_info}",
+            f"Cargo **{role.name if role else self.painel_view.cargo_id}** selecionado!\nTempo: {tempo_info}",
             ephemeral=True
         )
         await self.painel_view._try_finalizar(interaction)
@@ -478,16 +454,14 @@ class TempoView(View):
             discord.SelectOption(label="30 dias",     value="30", description="Cargo expira em 30 dias"),
             discord.SelectOption(label="60 dias",     value="60", description="Cargo expira em 60 dias"),
             discord.SelectOption(label="90 dias",     value="90", description="Cargo expira em 90 dias"),
-            discord.SelectOption(label="Permanente",  value="-1", description="Cargo nunca expira (permanente)"),
+            discord.SelectOption(label="Permanente",  value="-1", description="Cargo nunca expira"),
         ]
     )
     async def select_tempo(self, interaction: discord.Interaction, select: Select):
         if interaction.user != self.ctx.author:
             await interaction.response.send_message("Sem permissao.", ephemeral=True)
             return
-
         dias = int(select.values[0])
-
         if self.role is not None:
             set_role_tempo(self.ctx.guild.id, self.role.id, dias)
             titulo = f"Tempo Configurado — {self.role.name}"
@@ -496,10 +470,8 @@ class TempoView(View):
             upsert_config(self.ctx.guild.id, tempo_dias=dias)
             titulo = "Tempo Global Configurado"
             desc   = f"O tempo padrão de cargo foi definido para **{tempo_str(dias)}**."
-
         embed = make_base_embed(self.ctx.guild, titulo, discord.Color(0x000000))
         embed.description = desc
-
         for item in self.children:
             item.disabled = True
         await interaction.response.edit_message(embed=embed, view=self)
@@ -514,50 +486,39 @@ class TempoView(View):
 # ── Modals — EmbedEnv ─────────────────────────────────────────────────────────
 class ModalTitulo(Modal, title="Definir Titulo"):
     campo = TextInput(label="Titulo da embed", placeholder="Digite o titulo...", max_length=256, required=True)
-
     def __init__(self, env_view):
         super().__init__()
         self.env_view = env_view
-
     async def on_submit(self, interaction: discord.Interaction):
         self.env_view.state["titulo"] = self.campo.value.strip()
         await interaction.response.send_message(f"Titulo definido: **{self.campo.value.strip()}**", ephemeral=True)
         await self.env_view.atualizar_painel()
 
-
 class ModalBanner(Modal, title="Definir Banner"):
     campo = TextInput(label="URL da imagem do banner", placeholder="https://i.imgur.com/exemplo.png", max_length=500, required=True)
-
     def __init__(self, env_view):
         super().__init__()
         self.env_view = env_view
-
     async def on_submit(self, interaction: discord.Interaction):
         self.env_view.state["banner"] = self.campo.value.strip()
         await interaction.response.send_message("Banner salvo!", ephemeral=True)
         await self.env_view.atualizar_painel()
 
-
 class ModalLogo(Modal, title="Definir Logo"):
     campo = TextInput(label="URL da imagem da logo", placeholder="https://i.imgur.com/exemplo.png", max_length=500, required=True)
-
     def __init__(self, env_view):
         super().__init__()
         self.env_view = env_view
-
     async def on_submit(self, interaction: discord.Interaction):
         self.env_view.state["logo"] = self.campo.value.strip()
         await interaction.response.send_message("Logo salva!", ephemeral=True)
         await self.env_view.atualizar_painel()
 
-
 class ModalCor(Modal, title="Definir Cor"):
     campo = TextInput(label="Cor em hexadecimal", placeholder="#FF0000", min_length=4, max_length=7, required=True)
-
     def __init__(self, env_view):
         super().__init__()
         self.env_view = env_view
-
     async def on_submit(self, interaction: discord.Interaction):
         valor = self.campo.value.strip().lstrip("#")
         try:
@@ -568,27 +529,21 @@ class ModalCor(Modal, title="Definir Cor"):
         except ValueError:
             await interaction.response.send_message("Cor invalida. Use formato hex, ex: `#FF0000`", ephemeral=True)
 
-
 class ModalDescricao(Modal, title="Definir Descricao"):
     campo = TextInput(label="Descricao da embed", placeholder="Digite a descricao...", max_length=4000, style=discord.TextStyle.paragraph, required=True)
-
     def __init__(self, env_view):
         super().__init__()
         self.env_view = env_view
-
     async def on_submit(self, interaction: discord.Interaction):
         self.env_view.state["descricao"] = self.campo.value.strip()
         await interaction.response.send_message("Descricao definida!", ephemeral=True)
         await self.env_view.atualizar_painel()
 
-
 class ModalCanal(Modal, title="Definir Canal"):
     campo = TextInput(label="ID ou mencao do canal", placeholder="123456789012345678", max_length=100, required=True)
-
     def __init__(self, env_view):
         super().__init__()
         self.env_view = env_view
-
     async def on_submit(self, interaction: discord.Interaction):
         valor = self.campo.value.strip().strip("<>#")
         try:
@@ -601,14 +556,14 @@ class ModalCanal(Modal, title="Definir Canal"):
             else:
                 await interaction.response.send_message("Canal nao encontrado ou nao e um canal de texto.", ephemeral=True)
         except ValueError:
-            await interaction.response.send_message("ID invalido. Coloque apenas os numeros do ID do canal.", ephemeral=True)
+            await interaction.response.send_message("ID invalido.", ephemeral=True)
 
 
 # ── View — EmbedEnv ───────────────────────────────────────────────────────────
 class EmbedEnvView(View):
     def __init__(self, ctx: commands.Context):
         super().__init__(timeout=120)
-        self.ctx = ctx
+        self.ctx  = ctx
         self.msg: discord.Message | None = None
         self.state = {"titulo": None, "descricao": None, "banner": None, "logo": None, "cor": None, "canal_id": None}
 
@@ -618,13 +573,13 @@ class EmbedEnvView(View):
     def build_painel_embed(self) -> discord.Embed:
         canal = self.ctx.guild.get_channel(self.state["canal_id"]) if self.state["canal_id"] else None
         embed = discord.Embed(title="Painel de Embed", color=discord.Color(0x000000), timestamp=datetime.utcnow())
-        embed.add_field(name="Titulo",    value=self._nd(self.state["titulo"]),  inline=True)
-        embed.add_field(name="Cor",       value=self._nd(self.state["cor"]),     inline=True)
+        embed.add_field(name="Titulo",    value=self._nd(self.state["titulo"]), inline=True)
+        embed.add_field(name="Cor",       value=self._nd(self.state["cor"]),    inline=True)
         embed.add_field(name="Canal",     value=canal.mention if canal else "Nao definido", inline=True)
         desc_preview = (self.state["descricao"][:80] + "...") if self.state["descricao"] and len(self.state["descricao"]) > 80 else self.state["descricao"]
-        embed.add_field(name="Descricao", value=self._nd(desc_preview),          inline=False)
-        embed.add_field(name="Banner",    value=self._nd(self.state["banner"]),  inline=False)
-        embed.add_field(name="Logo",      value=self._nd(self.state["logo"]),    inline=False)
+        embed.add_field(name="Descricao", value=self._nd(desc_preview),         inline=False)
+        embed.add_field(name="Banner",    value=self._nd(self.state["banner"]), inline=False)
+        embed.add_field(name="Logo",      value=self._nd(self.state["logo"]),   inline=False)
         embed.set_footer(text=self.ctx.guild.name)
         return embed
 
@@ -650,72 +605,52 @@ class EmbedEnvView(View):
     @discord.ui.button(label="Titulo",    style=discord.ButtonStyle.secondary, row=0)
     async def btn_titulo(self, interaction: discord.Interaction, button: Button):
         if not self._check_autor(interaction):
-            await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True)
-            return
+            await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True); return
         await interaction.response.send_modal(ModalTitulo(self))
 
     @discord.ui.button(label="Descricao", style=discord.ButtonStyle.secondary, row=0)
     async def btn_descricao(self, interaction: discord.Interaction, button: Button):
         if not self._check_autor(interaction):
-            await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True)
-            return
+            await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True); return
         await interaction.response.send_modal(ModalDescricao(self))
 
     @discord.ui.button(label="Banner",    style=discord.ButtonStyle.secondary, row=0)
     async def btn_banner(self, interaction: discord.Interaction, button: Button):
         if not self._check_autor(interaction):
-            await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True)
-            return
+            await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True); return
         await interaction.response.send_modal(ModalBanner(self))
 
     @discord.ui.button(label="Logo",      style=discord.ButtonStyle.secondary, row=0)
     async def btn_logo(self, interaction: discord.Interaction, button: Button):
         if not self._check_autor(interaction):
-            await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True)
-            return
+            await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True); return
         await interaction.response.send_modal(ModalLogo(self))
 
     @discord.ui.button(label="Cor",       style=discord.ButtonStyle.secondary, row=1)
     async def btn_cor(self, interaction: discord.Interaction, button: Button):
         if not self._check_autor(interaction):
-            await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True)
-            return
+            await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True); return
         await interaction.response.send_modal(ModalCor(self))
 
     @discord.ui.button(label="Canal",     style=discord.ButtonStyle.secondary, row=1)
     async def btn_canal(self, interaction: discord.Interaction, button: Button):
         if not self._check_autor(interaction):
-            await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True)
-            return
+            await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True); return
         await interaction.response.send_modal(ModalCanal(self))
 
-    @discord.ui.button(label="Enviar",    style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Enviar",    style=discord.ButtonStyle.success, row=1)
     async def btn_enviar(self, interaction: discord.Interaction, button: Button):
         if not self._check_autor(interaction):
-            await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True)
-            return
+            await interaction.response.send_message("Apenas quem abriu o painel pode usar.", ephemeral=True); return
         if not self.state["titulo"]:
-            await interaction.response.send_message("Defina o titulo antes de enviar.", ephemeral=True)
-            return
+            await interaction.response.send_message("Defina o titulo antes de enviar.", ephemeral=True); return
         if not self.state["canal_id"]:
-            await interaction.response.send_message("Defina o canal antes de enviar.", ephemeral=True)
-            return
+            await interaction.response.send_message("Defina o canal antes de enviar.", ephemeral=True); return
         canal = interaction.guild.get_channel(self.state["canal_id"])
         if not canal:
-            await interaction.response.send_message("Canal nao encontrado.", ephemeral=True)
-            return
-        cor_int = 0x000000
-        if self.state["cor"]:
-            try:
-                cor_int = int(self.state["cor"].lstrip("#"), 16)
-            except Exception:
-                pass
-        embed_final = discord.Embed(
-            title=self.state["titulo"],
-            description=self.state["descricao"] if self.state["descricao"] else None,
-            color=discord.Color(cor_int),
-            timestamp=datetime.utcnow()
-        )
+            await interaction.response.send_message("Canal nao encontrado.", ephemeral=True); return
+        cor_int = int(self.state["cor"].lstrip("#"), 16) if self.state["cor"] else 0x000000
+        embed_final = discord.Embed(title=self.state["titulo"], description=self.state["descricao"], color=discord.Color(cor_int), timestamp=datetime.utcnow())
         if self.state["banner"]:
             embed_final.set_image(url=self.state["banner"])
         if self.state["logo"]:
@@ -749,19 +684,16 @@ async def cmd_painel(ctx: commands.Context, target: discord.Member = None):
         embed.description = "Mencione um usuario: `br!painel @usuario`"
         await ctx.send(embed=embed)
         return
-
     embed = make_base_embed(ctx.guild, "Painel de Setagem", discord.Color(0x000000))
     embed.description = (
         f"Configurando cargo para {target.mention}\n\n"
         "Use os botoes abaixo para configurar o **cargo**, o **servidor** e o **ID do servidor**.\n"
         "O painel fecha automaticamente em **30 segundos**."
     )
-
     view = PainelView(ctx, target)
     msg  = await ctx.send(embed=embed, view=view)
     view.msg = msg
     await view.wait()
-
     if not (view.cargo_id and view.servidor and view.servidor_id):
         for item in view.children:
             item.disabled = True
@@ -786,31 +718,26 @@ async def cmd_perfil(ctx: commands.Context, target: discord.Member = None):
         embed.description = "Mencione um usuario: `br!perfil @usuario`"
         await ctx.send(embed=embed)
         return
-
     conn = get_db()
     rows = conn.execute(
-        """SELECT * FROM cargos_setados
-           WHERE guild_id = ? AND user_id = ? AND removido = 0
-           ORDER BY data_setado DESC""",
+        "SELECT * FROM cargos_setados WHERE guild_id = ? AND user_id = ? AND removido = 0 ORDER BY data_setado DESC",
         (ctx.guild.id, target.id)
     ).fetchall()
     conn.close()
-
     embed = make_base_embed(ctx.guild, f"Perfil de Cargos — {target.display_name}", discord.Color(0x000000))
     if target.avatar:
         embed.set_thumbnail(url=target.display_avatar.url)
     embed.description = f"Usuario: {target.mention} (`{target.id}`)"
-
     if not rows:
         embed.add_field(name="Nenhum cargo ativo", value="Este usuario nao possui cargos temporarios ativos no momento.", inline=False)
     else:
         for row in rows:
             row  = dict(row)
             role = ctx.guild.get_role(row["cargo_id"])
-            nome_cargo     = role.mention if role else f"Cargo removido (`{row['cargo_id']}`)"
-            permanente     = row.get("tempo_permanente", 0)
-            restante       = tempo_restante_str(row.get("data_expiracao"), permanente)
-            expiracao      = "Permanente" if permanente else fmt_dt(row.get("data_expiracao"))
+            nome_cargo      = role.mention if role else f"Cargo removido (`{row['cargo_id']}`)"
+            permanente      = row.get("tempo_permanente", 0)
+            restante        = tempo_restante_str(row.get("data_expiracao"), permanente)
+            expiracao       = "Permanente" if permanente else fmt_dt(row.get("data_expiracao"))
             setado_por_user = ctx.guild.get_member(row["setado_por"])
             setado_por_str  = setado_por_user.mention if setado_por_user else f"`{row['setado_por']}`"
             embed.add_field(
@@ -825,7 +752,6 @@ async def cmd_perfil(ctx: commands.Context, target: discord.Member = None):
                 ),
                 inline=False
             )
-
     embed.set_footer(text=f"{ctx.guild.name} • {len(rows)} cargo(s) ativo(s)")
     await ctx.send(embed=embed)
 
@@ -865,10 +791,7 @@ async def cmd_settempo(ctx: commands.Context, role: discord.Role = None):
             pass
         return
     embed = make_base_embed(ctx.guild, f"Configurar Tempo — {role.name}", discord.Color(0x000000))
-    embed.description = (
-        f"Selecione o tempo de expiracao para o cargo {role.mention}.\n"
-        f"Este tempo sera usado sempre que esse cargo for setado via `{PREFIX}painel`."
-    )
+    embed.description = f"Selecione o tempo de expiracao para o cargo {role.mention}."
     view = TempoView(ctx, role=role)
     msg  = await ctx.send(embed=embed, view=view)
     await view.wait()
@@ -883,23 +806,19 @@ async def cmd_settempo(ctx: commands.Context, role: discord.Role = None):
 @is_owner()
 async def cmd_tempos(ctx: commands.Context):
     conn = get_db()
-    rows = conn.execute(
-        "SELECT cargo_id, tempo_dias FROM role_tempo WHERE guild_id = ? ORDER BY tempo_dias",
-        (ctx.guild.id,)
-    ).fetchall()
+    rows = conn.execute("SELECT cargo_id, tempo_dias FROM role_tempo WHERE guild_id = ? ORDER BY tempo_dias", (ctx.guild.id,)).fetchall()
     conn.close()
     embed = make_base_embed(ctx.guild, "Configuracoes de Tempo por Cargo", discord.Color(0x000000))
     if not rows:
-        embed.description = f"Nenhum cargo com tempo configurado.\nUse `{PREFIX}settempo @cargo` para definir."
+        embed.description = f"Nenhum cargo configurado. Use `{PREFIX}settempo @cargo`."
     else:
         linhas = []
         for row in rows:
             role = ctx.guild.get_role(row["cargo_id"])
             nome = role.mention if role else f"~~Cargo removido~~ (`{row['cargo_id']}`)"
-            t    = tempo_str(row["tempo_dias"])
-            linhas.append(f"{nome} — **{t}**")
+            linhas.append(f"{nome} — **{tempo_str(row['tempo_dias'])}**")
         embed.description = "\n".join(linhas)
-        embed.set_footer(text=f"{ctx.guild.name} • {len(rows)} cargo(s) configurado(s)")
+        embed.set_footer(text=f"{ctx.guild.name} • {len(rows)} cargo(s)")
     await ctx.send(embed=embed)
 
 
@@ -909,7 +828,7 @@ async def cmd_log(ctx: commands.Context, channel: discord.TextChannel = None):
     target_channel = channel or ctx.channel
     upsert_config(ctx.guild.id, log_channel_id=target_channel.id)
     embed = make_base_embed(ctx.guild, "Canal de Log Configurado", discord.Color(0x000000))
-    embed.description = f"O canal {target_channel.mention} agora recebera todos os logs de cargos."
+    embed.description = f"O canal {target_channel.mention} agora recebera todos os logs."
     await ctx.send(embed=embed)
 
 
@@ -928,21 +847,31 @@ async def cmd_start(ctx: commands.Context):
     cfg        = get_config(ctx.guild.id)
     staff_role = ctx.guild.get_role(cfg["staff_role_id"]) if cfg["staff_role_id"] else None
     log_ch     = ctx.guild.get_channel(cfg["log_channel_id"]) if cfg["log_channel_id"] else None
-
-    def status(valor):
-        return "Configurado" if valor else "Pendente"
-
+    def status(v): return "Configurado" if v else "Pendente"
     embed = make_base_embed(ctx.guild, "Configuracao Inicial - br! Bot", discord.Color(0x000000))
-    embed.description = "Bem-vindo! Siga os passos abaixo para configurar o bot no servidor."
-    embed.add_field(name="Passo 1 — Cargo Staff",   value=f"`{PREFIX}setcargo @cargo`\nSituacao: **{status(staff_role)}**" + (f" ({staff_role.mention})" if staff_role else ""), inline=False)
-    embed.add_field(name="Passo 2 — Tempo por Cargo", value=f"`{PREFIX}settempo @cargo` — define o tempo\n`{PREFIX}tempos` — ve todos os tempos", inline=False)
-    embed.add_field(name="Passo 3 — Canal de Log",  value=f"`{PREFIX}log #canal`\nSituacao: **{status(log_ch)}**" + (f" ({log_ch.mention})" if log_ch else ""), inline=False)
-    embed.add_field(name="Pronto para usar",         value=f"`{PREFIX}painel @usuario` — Seta cargo\n`{PREFIX}perfil @usuario` — Ve cargos ativos", inline=False)
+    embed.description = "Bem-vindo! Siga os passos abaixo para configurar o bot."
+    embed.add_field(name="Passo 1 — Cargo Staff",    value=f"`{PREFIX}setcargo @cargo`\nSituacao: **{status(staff_role)}**" + (f" ({staff_role.mention})" if staff_role else ""), inline=False)
+    embed.add_field(name="Passo 2 — Tempo por Cargo",value=f"`{PREFIX}settempo @cargo` — define o tempo\n`{PREFIX}tempos` — lista os tempos", inline=False)
+    embed.add_field(name="Passo 3 — Canal de Log",   value=f"`{PREFIX}log #canal`\nSituacao: **{status(log_ch)}**" + (f" ({log_ch.mention})" if log_ch else ""), inline=False)
+    embed.add_field(name="Pronto para usar",          value=f"`{PREFIX}painel @usuario`\n`{PREFIX}perfil @usuario`", inline=False)
     await ctx.send(embed=embed)
 
 
 @bot.command(name="help")
 @is_staff()
-async def cmd_help( **...**
+async def cmd_help(ctx: commands.Context):
+    cfg        = get_config(ctx.guild.id)
+    staff_role = ctx.guild.get_role(cfg["staff_role_id"]) if cfg["staff_role_id"] else None
+    log_ch     = ctx.guild.get_channel(cfg["log_channel_id"]) if cfg["log_channel_id"] else None
+    embed = make_base_embed(ctx.guild, "Comandos - br! Bot", discord.Color(0x000000))
+    embed.description = f"Prefixo: `{PREFIX}`"
+    embed.add_field(name="Comandos Staff", value=(
+        f"`{PREFIX}painel @usuario` — Seta cargo temporario\n"
+        f"`{PREFIX}perfil @usuario` — Ve cargos ativos\n"
+        f"`{PREFIX}aviso` — Envia 100 avisos em um canal\n"
+        f"`{PREFIX}help` — Esta lista"
+    ), inline=False)
+    embed.add_field(name="Comandos Dono", value=(
+        f"`{PREFIX}start` — Guia de con **...**
 
 _This response is too long to display in full._
